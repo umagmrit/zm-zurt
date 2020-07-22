@@ -13,7 +13,7 @@ all: zimbra-zurt-pkg
 ########################################################################################################
 
 ZURT_VERSION = 1.0.0
-NG_URL="https://files.zimbra.com/downloads/tmp/zurt/zimbra-URT-1.0.0-BETA-20200716123829.tgz"
+ZURT_URL="https://files.zimbra.com/downloads/tmp/zurt/zimbra-URT-1.0.0-BETA-20200716123829.tgz"
 
 stage-zurt-pkg: downloads
 	install -T -D  downloads/zimbra-URT/conf/log4j2.xml	build/stage/zimbra-zurt/opt/zurt/conf/log4j2.xml
@@ -37,18 +37,18 @@ zimbra-zurt-pkg: stage-zurt-pkg
            --pkg-summary="Zimbra Reporting Tool" \
            --pkg-pre-install-script='scripts/preinst.sh'\
            --pkg-post-install-script='scripts/postinst.sh'\
-		   --pkg-installs='/opt/zurt/conf/*' \
-		   --pkg-installs='/opt/zurt/docs/*' \
-		   --pkg-installs='/opt/zurt/lib/*'  \
-		   --pkg-installs='/opt/zurt/bin/*' \
-		   --pkg-installs='/opt/zurt/log/*' \
-		   --pkg-installs='/opt/zurt/service/*' \
-		   --pkg-installs='/etc/init.d/zurt'
+	   --pkg-installs='/opt/zurt/conf/*' \
+	   --pkg-installs='/opt/zurt/docs/*' \
+	   --pkg-installs='/opt/zurt/lib/*'  \
+	   --pkg-installs='/opt/zurt/bin/*' \
+	   --pkg-installs='/opt/zurt/log/*' \
+	   --pkg-installs='/opt/zurt/service/*' \
+	   --pkg-installs='/etc/init.d/zurt'
 
 ########################################################################################################
 downloads:
 	mkdir -p downloads
-	wget -O downloads/zurt.tar.gz $(NG_URL)
+	wget -O downloads/zurt.tar.gz $(ZURT_URL)
 	cd downloads/; mkdir zimbra-URT ;tar -xvzf zurt.tar.gz -C zimbra-URT --strip-components 1
 
 ########################################################################################################
