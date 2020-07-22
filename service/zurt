@@ -1,0 +1,48 @@
+stopZURT() {
+     echo -n "Shutting down ZURT... "
+     PIDFILE=/opt/zurt/bin/dgs.pid
+     if test -f "$PIDFILE"; then
+         kill $(cat $PIDFILE)
+     fi
+}
+
+startZURT() {
+    echo -n "Starting ZURT... "
+    cd /opt/zurt
+    nohup /opt/zurt/bin/zurt.sh </dev/null &
+}
+
+statusZURT() {
+     PIDFILE=/opt/zurt/bin/dgs.pid
+     if test -f "$PIDFILE"; then
+         echo "ZURT running... "
+     else
+         echo "ZURT not running... "
+     fi
+}
+
+case "$1" in
+    restart)
+        stopZURT
+        startZURT
+        RETVAL=$?
+        ;;
+    start)
+        startZURT
+        RETVAL=$?
+        ;;
+    stop)
+        stopZURT
+        RETVAL=$?
+        ;;
+    status)
+        statusZURT
+        RETVAL=$?
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|restart|status}"
+        RETVAL=1
+esac
+exit 
+
+

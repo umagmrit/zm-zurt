@@ -1,0 +1,252 @@
+ZMJAVA="/opt/zimbra/common/lib/jvm/java/bin/java"
+USEJAVA="java"
+ZURTSERVICE="zurt"
+ZURT_INITD_SERVICE_FILE="/etc/init.d/$ZURTSERVICE"
+INSTALLPATH="/opt/zurt"
+declare -A LDAPPROPERTIES
+
+#########################
+# The command line help #
+#########################
+display_help() {
+    echo "Usage: $0 [option...] {interval}" >&2
+    echo
+    echo "   -i, --interval           run ZURT with the given interval in milliseconds to post usage data"
+    echo "   -d, --dryrun             run ZURT create debug data but do not post to usage portal"
+    echo "   -v, --verbose            run ZURT with TRACE level logging"
+    echo
+}
+
+while [ "$1" != "" ]; do
+    case $1 in
+        -i | --interval ) shift
+                          INTERVAL=$1;;
+        -d | --dryrun )   DRYRUN=true;;
+        -v | --verbose )  VERBOSE=trace;;
+        -h | --help ) display_help
+                      exit;;
+        * ) display_help
+            exit 1
+    esac
+    shift
+done
+
+###################
+# Get JDK Version #
+###################
+jdk_version() {
+    local result
+    local java_cmd
+    java_cmd="$1"
+
+    local IFS=$'\n'
+    if [[ -z $java_cmd ]]
+    then
+        result=no_java
+    else
+        local lines=$("$java_cmd" -version 2>&1 | tr '\r' '\n')
+        for line in $lines; do
+            if [[ (-z $result) && ($line = *"version \""*) ]]
+            then
+                local ver=$(echo $line | sed -e 's/.*version "\(.*\)"\(.*\)/\1/; 1q')
+                if [[ $ver = "1."* ]]
+                then
+                    result=$(echo $ver | sed -e 's/1\.\([0-9]*\)\(.*\)/\1/; 1q')
+                else
+                    result=$(echo $ver | sed -e 's/\([0-9]*\)\(.*\)/\1/; 1q')
+                fi
+            fi
+        done
+    fi
+    echo "$result"
+}
+
+
+#################################
+# Verify required zmjava exists #
+#################################
+hasValidZmJavaInstalled() {
+    valid=1
+    check=$(type -p "$ZMJAVA")
+    if [ "$check" == "$ZMJAVA" ]; then
+        version="$(jdk_version $ZMJAVA)"
+        if [[ $version -gt 7 ]]; then
+            valid=0
+        fi
+    fi
+    echo $valid
+}
+
+###############################
+# Verify required java exists #
+###############################
+hasValidSysJavaInstalled() {
+    valid=1
+    check=$(type -p java)
+    if [ "$check" == "/usr/bin/java" ]; then
+        _java=java
+    elif [[ -n "$JAVA_HOME" ]] && [[ -x "$JAVA_HOME/bin/java" ]];  then
+        _java="$JAVA_HOME/bin/java"
+    fi
+
+    if [[ "$_java" ]]; then
+        version="$(jdk_version $_java)"
+        if [[ $version -gt 7 ]]; then
+            valid=0
+        fi
+    fi
+    echo $valid
+}
+
+############################################
+# Verify required java/zmjava is installed #
+############################################
+verify_java_installation() {
+    echo "Checking for an installed version of Java..."
+    if [[ $(hasValidZmJavaInstalled) -eq 0 ]]; then
+        USEJAVA=$ZMJAVA
+        echo "**** Found valid $ZMJAVA version"
+    elif [[ $(hasValidSysJavaInstalled) -eq 0 ]]; then
+        USEJAVA="java"
+        echo "**** Found valid system java version"
+    else
+        echo "**** ERROR: Valid Java installation was not found. Please install a valid java version > 1.7, set the JAVA_HOME and PATH variable, then re-run the installation."
+        exit
+    fi
+}
+
+#############################################
+# Stopping existing data collection process #
+#############################################
+stopDataCollection() {
+        service "$ZURTSERVICE" status > /dev/null 2>&1
+        if [ $? = 0 ]; then
+            service "$ZURTSERVICE" stop
+        fi
+        if test -f "$ZURT_INITD_SERVICE_FILE"; then
+            rm $ZURT_INITD_SERVICE_FILE
+        fi
+}
+
+###########################################
+# Configure ZURT for usage data collection #
+###########################################
+configureDgs() {
+    if [[ "$USEJAVA" == "$ZMJAVA" ]]; then
+        DEPLOYMENT=$($ZMJAVA -jar /opt/zurt/lib/zrt-cli*.jar 2>&1)
+    else
+        DEPLOYMENT=$(java -jar /opt/zurt/lib/zrt-cli*.jar 2>&1)
+    fi
+
+    if [[ "$DEPLOYMENT" == *"Instance info added"* ]]; then
+        echo "**** Done configuring"
+        return 0
+    else
+        if  [[ "$DEPLOYMENT" == *"License info not found"* ]]; then
+            echo "**** License info not found using LDAP"
+        elif [[ "$DEPLOYMENT" == *"INVALID_REQUEST"* ]]; then
+            echo "**** License info could not be verified by usage server."
+        elif [[ "$DEPLOYMENT" == *"Connection refused"* ]]; then
+            echo "**** Connection to usage server failed."
+        else
+            echo "**** Instance info not added due to errors."
+        fi
+        errLog="$INSTALLPATH/log/error.log"
+        echo > "$errLog"
+        echo "$DEPLOYMENT" >> $errLog
+        echo "**** Check $INSTALLPATH/log/error.log for details."
+        return 1
+    fi
+}
+
+
+#################################
+# Run ZURT usage data collection #
+#################################
+collect_usage_data() {
+    service $ZURTSERVICE start
+}
+
+echo ""
+if [[ -d "${INSTALLPATH}" && ! -L "${INSTALLPATH}" && -w "${INSTALLPATH}" ]] ; then
+    echo ""
+else
+    error=0
+    if [[ ! -d "${INSTALLPATH}" ]] ; then
+        echo "$INSTALLPATH" does not exist, creating it.
+        if ! mkdir -p "${INSTALLPATH}" 2>/dev/null; then
+            echo The folder "$INSTALLPATH" creation failed.
+            error=1
+        fi
+    elif [[ -L "${INSTALLPATH}" ]] ; then
+        echo The folder "$INSTALLPATH" is symbolic link.
+        error=1
+    elif [[ ! -w "${INSTALLPATH}" ]] ; then
+        echo The folder "$INSTALLPATH" does not have write permissions.
+        error=1
+    fi
+
+    if [[ $error == 1 ]]; then
+        echo The installation process will terminate due to folder issues.
+        exit 0
+    fi
+fi
+
+# verify if valid java/zmjava version is installed on the system
+verify_java_installation
+
+# stop the existing zrt service if its running
+stopDataCollection
+
+# install ZURT tool
+configureDgs
+INSTALLED=$?
+if [[ $INSTALLED == 0 ]]; then
+
+    # configure files & folder for zrt service
+    mkdir -p $INSTALLPATH/data
+
+    # add run file for service to execute
+    RUNFILE="$INSTALLPATH/bin/zurt.sh"
+    echo "#!/bin/bash" > $RUNFILE
+    echo "" >> $RUNFILE
+    if [ "$INTERVAL" -eq "$INTERVAL" ] 2>/dev/null
+    then
+        echo  -n "$USEJAVA -jar $INSTALLPATH/lib/usage-collector*.jar --task.collection.interval=$INTERVAL" >> $RUNFILE
+    else
+        echo -n "$USEJAVA -jar $INSTALLPATH/lib/usage-collector*.jar" >> $RUNFILE
+    fi
+
+    if [ "$VERBOSE" = "trace" ]; then
+        echo "Do verbose logging"
+        echo -n "  --logging.level.com.zimbra=$VERBOSE" >> $RUNFILE
+    fi
+
+    if [ "$DRYRUN" = "true" ]; then
+        echo "Do dry run"
+        echo  -n  "  --data.collection.dryrun=$DRYRUN" >> $RUNFILE
+    fi
+    chmod +x $RUNFILE
+	
+    cp -af /opt/zurt/service/zurt /etc/init.d/zurt
+	
+    # start ZURT service
+    collect_usage_data
+
+    echo "**** ZURT service started. Use below commands to start/stop/restart the service."
+    echo "* Start: service zurt start"
+    echo "* Stop: service zurt stop"
+    echo "* Restart: service zurt restart"
+    echo "* Status: service zurt status"
+    echo ""
+    echo "**** Account level data"
+    echo "To get account level data edit \"$INSTALLPATH/conf/zurt.properties\", set value of \"account.level.data\" to true & restart the service. Once started check \"$INSTALLPATH/data\" folder for CSV dumps."
+    echo "**** Collect domain data"
+    echo "To collect domain level data edit \"$INSTALLPATH/conf/zurt.properties\", set value of \"collect.domain.info\" to true & restart the service."
+	
+else
+    echo "**** ZURT installation failed due to errors, exiting..."
+    exit
+fi
+
+
